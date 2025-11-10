@@ -1,0 +1,23 @@
+spring:
+  ai:
+    dashscope:
+      api-key: sk-180606b601eb47f7806caa8a46ef8dfe
+      chat:
+        options:
+          model: qwen-plus
+  autoconfigure:
+    exclude=org:
+      springframework:
+        boot:
+          autoconfigure:
+            jdbc:
+              DataSourceAutoConfiguration:
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
