@@ -1,3 +1,8 @@
+aliyun:
+  bailian:
+    api-key: sk-180606b601eb47f7806caa8a46ef8dfe
+    endpoint: https://dashscope.aliyuncs.com
+
 spring:
   ai:
     dashscope:

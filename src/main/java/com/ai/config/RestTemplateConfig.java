@@ -6,9 +6,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.web.client.DefaultResponseErrorHandler;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.time.Duration;
 
@@ -17,7 +20,15 @@ public class RestTemplateConfig implements Autowired {
 
     @Bean  // 确保有这个注解
     public RestTemplate restTemplate() {
-        return new RestTemplate();
+        RestTemplate restTemplate = new RestTemplate();
+        restTemplate.setErrorHandler(new DefaultResponseErrorHandler() {
+            @Override
+            public boolean hasError(ClientHttpResponse response) throws IOException {
+                // 不对400以上的状态码抛出异常，让业务层处理
+                return false;
+            }
+        });
+        return restTemplate;
         // 或者你的自定义配置
         // return new RestTemplateBuilder().build();
     }
