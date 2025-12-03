@@ -1,11 +1,14 @@
 package com.ai.dataCleansing.service;
 
+import com.ai.dataCleansing.model.ConnectivitySpec;
+import com.ai.dataCleansing.model.ScreenSpec;
 import com.ai.dataCleansing.model.TVSpecification;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
@@ -13,7 +16,9 @@ import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -25,250 +30,195 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+// LLMDataExtractionService.java
 @Service
+@Primary
+@Slf4j
 public class LLMDataExtractionService {
-    @Value("${ai.model.api.key}")
-    private String apiKey;
 
-    @Value("${ai.model.endpoint}")
-    private String modelEndpoint;
+    @Autowired(required = false)
+    private DashScopeLLMService dashScopeLLMService;
 
-    private static final String EXTRACTION_PROMPT_TEMPLATE = """
-        请从以下电视机规格文本中提取结构化信息。文本内容：
-        %s
-        
-        请按照以下JSON格式返回提取结果，只返回JSON数据：
-        {
-            "modelNumber": "型号",
-            "brand": "品牌",
-            "series": "系列",
-            "screen": {
-                "size": 尺寸(数字),
-                "resolution": "分辨率",
-                "displayType": "显示技术",
-                "refreshRate": "刷新率",
-                "hdrSupport": true/false
-            },
-            "display": {
-                "colorTechnology": "色彩技术",
-                "contrastRatio": 对比度,
-                "viewingAngle": "可视角度",
-                "brightness": "亮度"
-            },
-            "audio": {
-                "outputPower": "输出功率",
-                "speakerConfiguration": "扬声器配置",
-                "audioTechnologies": ["音频技术1", "音频技术2"]
-            },
-            "connectivity": {
-                "hdmiPorts": HDMI端口数,
-                "usbPorts": USB端口数,
-                "wifi": true/false,
-                "bluetooth": true/false,
-                "ethernet": true/false
-            },
-            "power": {
-                "powerConsumption": "功耗",
-                "standbyPower": "待机功耗"
-            },
-            "dimension": {
-                "width": "宽度",
-                "height": "高度",
-                "depth": "厚度",
-                "weight": "重量"
-            },
-            "additionalFeatures": {
-                "feature1": "value1",
-                "feature2": "value2"
-            }
-        }
-        
-        如果某些信息无法提取，请使用null或空值。
-        """;
-
+    /**
+     * 提取规格信息
+     */
     public TVSpecification extractSpecifications(String textContent) {
-        String prompt = String.format(EXTRACTION_PROMPT_TEMPLATE, textContent);
-
-        // 调用大模型API
-        String response = callLLMAPI(prompt);
-
-        // 解析响应并转换为对象
-        return parseLLMResponse(response);
-    }
-
-    private String callLLMAPI(String prompt) {
-        // 使用HTTP客户端调用大模型API
         try {
-            CloseableHttpClient httpClient = HttpClients.createDefault();
-            HttpPost httpPost = new HttpPost(modelEndpoint);
+            log.info("开始提取规格信息，输入文本长度: {}", textContent.length());
 
-            // 构建请求体
-            String requestBody = buildRequestBody(prompt);
-            httpPost.setEntity(new StringEntity(requestBody, ContentType.APPLICATION_JSON));
-            httpPost.setHeader("Authorization", "Bearer " + apiKey);
+            // 1. 预处理文本
+            String cleanedText = preprocessText(textContent);
 
-            HttpResponse response = httpClient.execute(httpPost);
-            String responseBody = EntityUtils.toString(response.getEntity());
-
-            return extractContentFromResponse(responseBody);
-        } catch (Exception e) {
-            throw new RuntimeException("调用大模型API失败", e);
-        }
-    }
-
-    private TVSpecification parseLLMResponse(String response) {
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            return mapper.readValue(response, TVSpecification.class);
-        } catch (Exception e) {
-            throw new RuntimeException("解析大模型响应失败", e);
-        }
-    }
-
-    private String buildRequestBody(String prompt) {
-        // 构建大模型API请求体（以OpenAI格式为例）
-        ObjectMapper mapper = new ObjectMapper();
-        ObjectNode requestBody = mapper.createObjectNode();
-
-        requestBody.put("model", "gpt-4");  // 或其他适合的模型
-        requestBody.put("temperature", 0.1);  // 低温度确保输出稳定
-
-        ArrayNode messages = mapper.createArrayNode();
-        ObjectNode message = mapper.createObjectNode();
-        message.put("role", "user");
-        message.put("content", prompt);
-        messages.add(message);
-
-        requestBody.set("messages", messages);
-        requestBody.put("max_tokens", 2000);
-
-        try {
-            return mapper.writeValueAsString(requestBody);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("构建请求体失败", e);
-        }
-    }
-
-    private String extractContentFromResponse(String responseBody) {
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode rootNode = mapper.readTree(responseBody);
-
-            // 解析不同的响应格式
-            if (responseBody.contains("choices")) {
-                // OpenAI格式
-                JsonNode choicesNode = rootNode.path("choices");
-                if (choicesNode.isArray() && choicesNode.size() > 0) {
-                    JsonNode messageNode = choicesNode.get(0).path("message");
-                    return messageNode.path("content").asText();
-                }
-            } else if (responseBody.contains("result")) {
-                // 百度文心等格式
-                return rootNode.path("result").asText();
-            } else if (responseBody.contains("data")) {
-                // 其他自定义格式
-                return rootNode.path("data").path("content").asText();
+            // 2. 优先使用DashScope服务
+            if (dashScopeLLMService != null) {
+                log.info("使用DashScope服务进行AI提取");
+                return dashScopeLLMService.extractTVSpecifications(cleanedText);
             }
 
-            // 如果以上都不匹配，尝试直接提取JSON部分
-            return extractJsonFromText(responseBody);
+            // 3. 备用方案：使用正则表达式提取
+            log.warn("DashScope服务不可用，使用正则表达式提取");
+            return extractByRegex(cleanedText);
 
         } catch (Exception e) {
-            throw new RuntimeException("解析API响应失败", e);
+            log.error("提取规格信息失败", e);
+            return createDefaultSpecification(textContent);
         }
     }
 
-    private String extractJsonFromText(String text) {
-        // 使用正则表达式提取JSON部分
-        Pattern pattern = Pattern.compile("\\{.*\\}", Pattern.DOTALL);
-        Matcher matcher = pattern.matcher(text);
-
-        if (matcher.find()) {
-            return matcher.group();
+    /**
+     * 预处理文本
+     */
+    private String preprocessText(String text) {
+        if (text == null) {
+            return "";
         }
 
-        return text;  // 返回原始文本
+        // 1. 移除HTML标签
+        String cleaned = text.replaceAll("<[^>]*>", "");
+
+        // 2. 标准化空格和换行
+        cleaned = cleaned.replaceAll("\\s+", " ");
+        cleaned = cleaned.replaceAll("\\n+", "\n");
+
+        // 3. 移除特殊字符但保留中文、英文、数字和常用标点
+        cleaned = cleaned.replaceAll("[^a-zA-Z0-9\\u4e00-\\u9fa5\\s\\.,;:!?()\\[\\]{}/\\-+]", "");
+
+        // 4. 截断过长的文本（避免API限制）
+        if (cleaned.length() > 4000) {
+            cleaned = cleaned.substring(0, 4000) + "...[文本过长已截断]";
+            log.warn("输入文本过长，已截断为4000字符");
+        }
+
+        return cleaned.trim();
     }
 
-    // 处理各种大模型API的响应格式
-    private String handleDifferentAPIResponses(String responseBody) {
-        ObjectMapper mapper = new ObjectMapper();
+    /**
+     * 使用正则表达式提取基本信息
+     */
+    private TVSpecification extractByRegex(String text) {
+        TVSpecification spec = new TVSpecification();
 
-        try {
-            // 尝试解析为JSON
-            JsonNode rootNode = mapper.readTree(responseBody);
-
-            // 检查常见的大模型API响应格式
-            if (rootNode.has("choices") && rootNode.get("choices").isArray()) {
-                // OpenAI格式
-                return rootNode.get("choices").get(0).get("message").get("content").asText();
-            } else if (rootNode.has("output") && rootNode.get("output").has("text")) {
-                // Claude格式
-                return rootNode.get("output").get("text").asText();
-            } else if (rootNode.has("result")) {
-                // 百度文心一言格式
-                return rootNode.get("result").asText();
-            } else if (rootNode.has("content")) {
-                // 通用格式
-                return rootNode.get("content").asText();
-            } else {
-                // 如果无法识别格式，返回第一个文本字段
-                Iterator<JsonNode> elements = rootNode.elements();
-                while (elements.hasNext()) {
-                    JsonNode element = elements.next();
-                    if (element.isTextual() && element.asText().length() > 50) {
-                        return element.asText();
-                    }
-                }
+        // 提取型号（多种格式）
+        Pattern modelPattern = Pattern.compile(
+                "(?:型号|Model|型号编号)[:：]?\\s*([A-Za-z0-9\\-\\_\\/]+(?:\\s+[A-Za-z0-9\\-\\_\\/]+)*)",
+                Pattern.CASE_INSENSITIVE
+        );
+        Matcher modelMatcher = modelPattern.matcher(text);
+        if (modelMatcher.find()) {
+            spec.setModelNumber(modelMatcher.group(1).trim());
+        } else {
+            // 尝试查找类似型号的模式
+            Pattern altPattern = Pattern.compile("([A-Z]{2,4}[\\-\\_]?\\d+[A-Z]?)");
+            Matcher altMatcher = altPattern.matcher(text);
+            if (altMatcher.find()) {
+                spec.setModelNumber(altMatcher.group(1));
             }
-        } catch (Exception e) {
-            // 如果不是JSON，直接返回
         }
 
-        return responseBody;
+        // 提取品牌
+        if (text.matches("(?i).*索尼|SONY.*")) {
+            spec.setBrand("SONY");
+        } else if (text.matches("(?i).*三星|SAMSUNG.*")) {
+            spec.setBrand("SAMSUNG");
+        } else if (text.matches("(?i).*LG.*")) {
+            spec.setBrand("LG");
+        } else if (text.matches("(?i).*海信|Hisense.*")) {
+            spec.setBrand("HISENSE");
+        } else if (text.matches("(?i).*TCL.*")) {
+            spec.setBrand("TCL");
+        } else if (text.matches("(?i).*小米|Xiaomi.*")) {
+            spec.setBrand("XIAOMI");
+        } else if (text.matches("(?i).*华为|Huawei.*")) {
+            spec.setBrand("HUAWEI");
+        }
+
+        // 提取屏幕尺寸
+        Pattern sizePattern = Pattern.compile(
+                "(\\d+(?:\\.\\d+)?)\\s*(?:英寸|寸|inch|INCH|\")",
+                Pattern.CASE_INSENSITIVE
+        );
+        Matcher sizeMatcher = sizePattern.matcher(text);
+        if (sizeMatcher.find()) {
+            ScreenSpec screen = spec.getScreen();
+            if (screen == null) {
+                screen = new ScreenSpec();
+                spec.setScreen(screen);
+            }
+            try {
+                screen.setSize(Double.parseDouble(sizeMatcher.group(1)));
+            } catch (NumberFormatException e) {
+                log.warn("无法解析屏幕尺寸: {}", sizeMatcher.group(1));
+            }
+        }
+
+        // 提取分辨率
+        Pattern resolutionPattern = Pattern.compile(
+                "(?:分辨率|分辨率)[:：]?\\s*(\\d+[xX×]\\d+|4[Kk]|1080[Pp]|720[Pp]|[Ff][Hh][Dd]|[Uu][Hh][Dd])",
+                Pattern.CASE_INSENSITIVE
+        );
+        Matcher resolutionMatcher = resolutionPattern.matcher(text);
+        if (resolutionMatcher.find()) {
+            ScreenSpec screen = spec.getScreen();
+            if (screen == null) {
+                screen = new ScreenSpec();
+                spec.setScreen(screen);
+            }
+            screen.setResolution(resolutionMatcher.group(1).toUpperCase());
+        }
+
+        // 提取HDMI端口数
+        Pattern hdmiPattern = Pattern.compile(
+                "(?:HDMI|hdmi)[:\\s]*(\\d+)(?:个|个端口)?",
+                Pattern.CASE_INSENSITIVE
+        );
+        Matcher hdmiMatcher = hdmiPattern.matcher(text);
+        if (hdmiMatcher.find()) {
+            ConnectivitySpec connectivity = spec.getConnectivity();
+            if (connectivity == null) {
+                connectivity = new ConnectivitySpec();
+                spec.setConnectivity(connectivity);
+            }
+            try {
+                connectivity.setHdmiPorts(Integer.parseInt(hdmiMatcher.group(1)));
+            } catch (NumberFormatException e) {
+                log.warn("无法解析HDMI端口数: {}", hdmiMatcher.group(1));
+            }
+        }
+
+        return spec;
     }
 
-    // 备用的API调用方法（使用RestTemplate）
-    private String callLLMAPIWithRestTemplate(String prompt) {
-        try {
-            RestTemplate restTemplate = new RestTemplate();
+    /**
+     * 创建默认规格（用于错误处理）
+     */
+    private TVSpecification createDefaultSpecification(String text) {
+        TVSpecification spec = new TVSpecification();
+        spec.setModelNumber("UNKNOWN-" + System.currentTimeMillis());
+        spec.setBrand("UNKNOWN");
 
-            // 构建请求头
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Authorization", "Bearer " + apiKey);
+        // 设置默认的屏幕规格
+        ScreenSpec screen = new ScreenSpec();
+        screen.setSize(55.0); // 默认55英寸
+        screen.setResolution("1920x1080"); // 默认1080p
+        spec.setScreen(screen);
 
-            // 构建请求体
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("model", "gpt-4");
-            requestBody.put("messages", List.of(Map.of("role", "user", "content", prompt)));
-            requestBody.put("temperature", 0.1);
-            requestBody.put("max_tokens", 2000);
+        // 设置默认的连接规格
+        ConnectivitySpec connectivity = new ConnectivitySpec();
+        connectivity.setHdmiPorts(3); // 默认3个HDMI
+        connectivity.setUsbPorts(2); // 默认2个USB
+        connectivity.setWifi(true); // 默认支持WiFi
+        spec.setConnectivity(connectivity);
 
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-
-            // 发送请求
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    modelEndpoint,
-                    HttpMethod.POST,
-                    request,
-                    Map.class
-            );
-
-            // 解析响应
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                Map<String, Object> body = response.getBody();
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) body.get("choices");
-                if (choices != null && !choices.isEmpty()) {
-                    Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                    return (String) message.get("content");
-                }
-            }
-
-            throw new RuntimeException("API调用失败: " + response.getStatusCode());
-
-        } catch (Exception e) {
-            throw new RuntimeException("调用大模型API失败", e);
+        // 记录原始文本信息
+        if (text != null && text.length() > 0) {
+            spec.setAdditionalFeatures(Map.of(
+                    "extraction_method", "regex_fallback",
+                    "original_text_preview", text.substring(0, Math.min(200, text.length())),
+                    "error_timestamp", String.valueOf(System.currentTimeMillis())
+            ));
         }
+
+        log.warn("使用默认规格信息，型号: {}", spec.getModelNumber());
+        return spec;
     }
 }

@@ -6,11 +6,13 @@ import org.apache.ibatis.annotations.Update;
 import org.apache.ibatis.annotations.UpdateProvider;
 import org.mapstruct.Mapper;
 import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Map;
 
-@Mapper
+//@Mapper
+//@Repository
 public interface TVSpecificationMapper extends BaseMapper<TVSpecificationEntity> {
 
     /**

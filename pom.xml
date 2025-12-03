@@ -98,11 +98,11 @@
         </dependency>
 
         <!-- Spring Boot Starter -->
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-spring-boot-starter</artifactId>
-            <version>${langchain4j.version}</version>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>dev.langchain4j</groupId>-->
+<!--            <artifactId>langchain4j-spring-boot-starter</artifactId>-->
+<!--            <version>${langchain4j.version}</version>-->
+<!--        </dependency>-->
 
         <!-- 如果需要 OpenAI -->
         <dependency>

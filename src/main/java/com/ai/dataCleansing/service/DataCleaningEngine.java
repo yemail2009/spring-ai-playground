@@ -2,6 +2,7 @@ package com.ai.dataCleansing.service;
 
 import com.ai.dataCleansing.model.*;
 import com.ai.dataCleansing.repository.TVSpecificationService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -12,6 +13,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
+@Slf4j
 public class DataCleaningEngine {
     @Autowired
     private LLMDataExtractionService extractionService;
@@ -47,7 +49,8 @@ public class DataCleaningEngine {
                 // 步骤5: 尝试数据映射修正
                 TVSpecification corrected = attemptDataCorrection(standardized, validation.getErrors());
                 if (corrected != null) {
-                    repository.save(corrected);
+                    log.warn("持久化的数据为 {}", corrected.toString());
+//                    repository.save(corrected);
                     result.setStatus(DataCleaningStatus.CORRECTED);
                     result.setProcessedData(corrected);
                 }
